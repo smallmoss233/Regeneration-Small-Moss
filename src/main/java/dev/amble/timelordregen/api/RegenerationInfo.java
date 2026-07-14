@@ -23,9 +23,12 @@ import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.effect.StatusEffectInstance;
+import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.registry.tag.DamageTypeTags;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.ActionResult;
@@ -107,14 +110,25 @@ public class RegenerationInfo {
             Delay.CODEC.fieldOf("delay").forGetter(info -> info.delay),
             Codec.FLOAT.fieldOf("colorR").forGetter(info -> info.particleColor.x()),
             Codec.FLOAT.fieldOf("colorG").forGetter(info -> info.particleColor.y()),
-            Codec.FLOAT.fieldOf("colorB").forGetter(info -> info.particleColor.z())
-    ).apply(instance, (usesLeft, isRegenerating, regenQueued, animationId, delay, r, g, b) -> {
+            Codec.FLOAT.fieldOf("colorB").forGetter(info -> info.particleColor.z()),
+            Codec.LONG.optionalFieldOf("invulnerableUntil", -1L).forGetter(RegenerationInfo::getInvulnerableUntil),
+            Codec.LONG.optionalFieldOf("confusedUntil", -1L).forGetter(RegenerationInfo::getConfusedUntil)
+    ).apply(instance, (usesLeft, isRegenerating, regenQueued, animationId, delay, r, g, b, invulnUntil, confUntil) -> {
         RegenerationInfo info = new RegenerationInfo(usesLeft, isRegenerating, regenQueued, animationId, delay);
         info.particleColor.set(r, g, b);
+        info.invulnerableUntil = invulnUntil;
+        info.confusedUntil = confUntil;
         return info;
     }));
 
     public static final int MAX_REGENERATIONS = 12;
+    private static final int INVULNERABLE_DURATION = 24000; // MC 内一天
+    private static final int CONFUSION_MIN_TICKS = 1200;      // 1 分钟
+    private static final int CONFUSION_MAX_EXTRA_TICKS = 3601; // 额外 0-3 分钟 (1200-4800 ticks 总计)
+    private static final int CONFUSION_EFFECT_INTERVAL_MIN = 100; // 5 秒
+    private static final int CONFUSION_EFFECT_INTERVAL_MAX = 300; // 15 秒
+    private static final float MIN_DAMAGE_CAP = 0.1f;
+    private static final float REGEN_BOOST_MULTIPLIER = 3.0f; // 无敌期回血加速倍数
 
     // ========== 字段 ==========
     private int usesLeft;
@@ -127,6 +141,12 @@ public class RegenerationInfo {
     @Nullable
     private AnimationSet currentAnimationSet;
 
+    // 重生后状态
+    private long invulnerableUntil; // 世界时间，-1 表示未激活
+    private long confusedUntil;     // 世界时间，-1 表示未激活
+    private int confusionEffectTimer;
+    private int regenBoostTimer;    // 回血加速 tick 计时器
+
     // ========== 构造器 ==========
     private RegenerationInfo(int usesLeft, boolean isRegenerating, boolean regenQueued, Identifier animation, Delay delay) {
         this.usesLeft = usesLeft;
@@ -135,6 +155,10 @@ public class RegenerationInfo {
         this.animation = RegenAnimRegistry.getInstance().getOrFallback(animation);
         this.delay = delay;
         this.particleColor = new Vector3f(1.0f, 1.0f, 1.0f);
+        this.invulnerableUntil = -1;
+        this.confusedUntil = -1;
+        this.confusionEffectTimer = 0;
+        this.regenBoostTimer = 0;
     }
 
     public RegenerationInfo() {
@@ -202,6 +226,22 @@ public class RegenerationInfo {
         this.markDirty();
     }
 
+    public long getInvulnerableUntil() {
+        return invulnerableUntil;
+    }
+
+    public long getConfusedUntil() {
+        return confusedUntil;
+    }
+
+    public boolean isInvulnerable() {
+        return this.invulnerableUntil > 0;
+    }
+
+    public boolean isConfused() {
+        return this.confusedUntil > 0;
+    }
+
     // ========== 业务方法 ==========
     public void decrement() {
         this.setUsesLeft(this.getUsesLeft() - 1);
@@ -219,6 +259,14 @@ public class RegenerationInfo {
                 this.sync(player, entity.getUuid());
             }
         }
+
+        long worldTime = entity.getWorld().getTime();
+
+        // 处理无敌期
+        this.tickInvulnerability(entity, worldTime);
+
+        // 处理混乱期
+        this.tickConfusion(entity, worldTime);
 
         if (delay.isRunning()) {
             if (this.getUsesLeft() <= 0) {
@@ -246,6 +294,154 @@ public class RegenerationInfo {
                 this.setRegenQueued(false);
                 this.markDirty();
                 RegenerationMod.LOGGER.warn("Regeneration start failed for {}, clearing queued state", entity.getUuid());
+            }
+        }
+    }
+
+    /**
+     * 处理无敌期逻辑 - 动态伤害减免 + 加速回血
+     */
+    private void tickInvulnerability(LivingEntity entity, long worldTime) {
+        if (this.invulnerableUntil <= 0) return;
+
+        if (worldTime >= this.invulnerableUntil) {
+            this.invulnerableUntil = -1;
+            this.markDirty();
+            RegenerationMod.LOGGER.info("Invulnerability ended for {}", entity.getUuid());
+            return;
+        }
+
+        // 加速回血：每 tick 尝试回血，频率比正常高 2-3 倍
+        this.tickRegenBoost(entity);
+    }
+
+    /**
+     * 无敌期加速回血
+     * 正常自然回血每 80 ticks (4秒) 回 1 点
+     * 加速后每 80/3 ≈ 26 ticks 回 1 点，即 3 倍速
+     */
+    private void tickRegenBoost(LivingEntity entity) {
+        if (entity.getHealth() >= entity.getMaxHealth()) return;
+        if (!(entity instanceof PlayerEntity)) return;
+
+        this.regenBoostTimer++;
+        // 正常回血间隔约 80 ticks，加速后除以倍数
+        int boostedInterval = (int) (80 / REGEN_BOOST_MULTIPLIER);
+        if (this.regenBoostTimer >= boostedInterval) {
+            this.regenBoostTimer = 0;
+            // 饥饿度足够时才回血（和原版一致）
+            PlayerEntity player = (PlayerEntity) entity;
+            if (player.getHungerManager().getFoodLevel() > 0 || player.getWorld().getGameRules().getBoolean(net.minecraft.world.GameRules.NATURAL_REGENERATION)) {
+                entity.heal(1.0f);
+                // 消耗饥饿度（原版自然回血的消耗比例）
+                if (player.getHungerManager().getFoodLevel() > 0) {
+                    player.getHungerManager().addExhaustion(3.0f);
+                }
+            }
+        }
+    }
+
+    /**
+     * 计算动态伤害减免后的伤害值
+     * 包含摔落伤害等所有非真实伤害
+     * 血量越低，减免越强，最低伤害为 0.1
+     * 真实伤害（/kill、虚空、魔法等）不减免
+     */
+    public float applyDamageReduction(LivingEntity entity, net.minecraft.entity.damage.DamageSource source, float amount) {
+        if (!this.isInvulnerable()) return amount;
+
+        // 真实伤害不减免：/kill、虚空、魔法伤害、饥饿、溺水等
+        if (source.isIn(DamageTypeTags.BYPASSES_INVULNERABILITY)) {
+            return amount;
+        }
+
+        // 摔落伤害、火焰、爆炸、物理攻击等都参与减免
+        float healthPercent = entity.getHealth() / entity.getMaxHealth();
+        // 血量越低，减免越强：满血时几乎无减免，残血时大幅减免
+        float reductionFactor = 1.0f - (healthPercent * 0.9f);
+        float reducedAmount = MathHelper.lerp(reductionFactor, amount, MIN_DAMAGE_CAP);
+        reducedAmount = Math.max(reducedAmount, MIN_DAMAGE_CAP);
+
+        return reducedAmount;
+    }
+
+    /**
+     * 处理混乱期逻辑：随机施加负面效果、随机转向等
+     */
+    private void tickConfusion(LivingEntity entity, long worldTime) {
+        if (this.confusedUntil <= 0) return;
+
+        if (worldTime >= this.confusedUntil) {
+            this.confusedUntil = -1;
+            this.confusionEffectTimer = 0;
+            this.markDirty();
+            RegenerationMod.LOGGER.info("Confusion ended for {}", entity.getUuid());
+            return;
+        }
+
+        if (entity.getWorld().isClient) return;
+
+        this.confusionEffectTimer--;
+        if (this.confusionEffectTimer > 0) return;
+
+        // 每 5-15 秒触发一次混乱效果
+        this.confusionEffectTimer = CONFUSION_EFFECT_INTERVAL_MIN +
+                RegenerationMod.RANDOM.nextInt(CONFUSION_EFFECT_INTERVAL_MAX - CONFUSION_EFFECT_INTERVAL_MIN + 1);
+
+        // 随机选择一种负面效果
+        int effectRoll = RegenerationMod.RANDOM.nextInt(100);
+        StatusEffectInstance effect = null;
+
+        if (effectRoll < 30) {
+            // 30% 反胃 (Nausea)
+            effect = new StatusEffectInstance(
+                    StatusEffects.NAUSEA,
+                    100 + RegenerationMod.RANDOM.nextInt(100), // 5-10 秒
+                    0, false, false, true
+            );
+        } else if (effectRoll < 55) {
+            // 25% 黑暗 (Darkness) - FIX: 从失明改为黑暗，更沉浸
+            effect = new StatusEffectInstance(
+                    StatusEffects.DARKNESS,
+                    60 + RegenerationMod.RANDOM.nextInt(80), // 3-7 秒
+                    0, false, false, true
+            );
+        } else if (effectRoll < 75) {
+            // 20% 缓慢 (Slowness)
+            effect = new StatusEffectInstance(
+                    StatusEffects.SLOWNESS,
+                    60 + RegenerationMod.RANDOM.nextInt(80), // 3-7 秒
+                    RegenerationMod.RANDOM.nextInt(2), false, false, true
+            );
+        } else if (effectRoll < 90) {
+            // 15% 虚弱 (Weakness)
+            effect = new StatusEffectInstance(
+                    StatusEffects.WEAKNESS,
+                    60 + RegenerationMod.RANDOM.nextInt(60), // 3-6 秒
+                    0, false, false, true
+            );
+        } else {
+            // 10% 瞬间跳跃
+            effect = new StatusEffectInstance(
+                    StatusEffects.JUMP_BOOST,
+                    20 + RegenerationMod.RANDOM.nextInt(40), // 1-3 秒
+                    2 + RegenerationMod.RANDOM.nextInt(3), false, false, true
+            );
+        }
+
+        if (effect != null) {
+            entity.addStatusEffect(effect);
+        }
+
+        // 30% 概率随机转向
+        if (RegenerationMod.RANDOM.nextFloat() < 0.3f) {
+            float randomYaw = (RegenerationMod.RANDOM.nextFloat() - 0.5f) * 90f;
+            entity.setYaw(entity.getYaw() + randomYaw);
+            if (entity instanceof ServerPlayerEntity player) {
+                player.networkHandler.requestTeleport(
+                        player.getX(), player.getY(), player.getZ(),
+                        player.getYaw(), player.getPitch()
+                );
             }
         }
     }
@@ -312,10 +508,17 @@ public class RegenerationInfo {
     private void finish(LivingEntity entity) {
         RegenerationMod.LOGGER.info("finish() called for {}", entity.getUuid());
 
-        // FIX: 强制清理动画状态，防止玩家卡在动画中无法移动
         this.resetAnimationState(entity);
-
         this.stopRegeneration(entity);
+
+        // 启动重生后状态：无敌期 + 混乱期
+        long worldTime = entity.getWorld().getTime();
+        this.invulnerableUntil = worldTime + INVULNERABLE_DURATION;
+        int confusionDuration = CONFUSION_MIN_TICKS + RegenerationMod.RANDOM.nextInt(CONFUSION_MAX_EXTRA_TICKS);
+        this.confusedUntil = worldTime + confusionDuration;
+        this.confusionEffectTimer = 0;
+        this.regenBoostTimer = 0;
+
         RegenerationEvents.FINISH.invoker().onFinish(entity, this);
         this.setAnimation(RegenAnimRegistry.getInstance().getRandom());
         this.markDirty();
@@ -323,7 +526,11 @@ public class RegenerationInfo {
         entity.setNoGravity(false);
         entity.setVelocity(entity.getVelocity().multiply(0.5));
         entity.updatePosition(entity.getX(), entity.getY(), entity.getZ());
-        RegenerationMod.LOGGER.info("Regeneration finished for {}", entity.getUuid());
+
+        RegenerationMod.LOGGER.info(
+                "Regeneration finished for {}. Dynamic damage reduction + boosted regen active for {} ticks, confused for {} ticks",
+                entity.getUuid(), INVULNERABLE_DURATION, confusionDuration
+        );
     }
 
     /**
@@ -349,19 +556,22 @@ public class RegenerationInfo {
 
     /**
      * 停止重生过程并清理所有相关状态
-     * @param entity 需要清理动画状态的实体，可为 null（仅在确定无动画状态时）
+     * @param entity 需要清理动画状态的实体，可为 null
      */
     public void stopRegeneration(@Nullable LivingEntity entity) {
-        // FIX: 如果有正在运行的动画集，先取消它
         if (this.currentAnimationSet != null) {
             this.currentAnimationSet.cancel();
             this.currentAnimationSet = null;
         }
 
-        // FIX: 清理实体动画状态
         if (entity instanceof AnimatedEntity) {
             this.resetAnimationState(entity);
         }
+
+        this.invulnerableUntil = -1;
+        this.confusedUntil = -1;
+        this.confusionEffectTimer = 0;
+        this.regenBoostTimer = 0;
 
         this.setRegenerating(false);
         this.delay.stop();

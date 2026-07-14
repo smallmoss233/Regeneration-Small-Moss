@@ -150,13 +150,6 @@ public class RegenDataGen implements DataGeneratorEntrypoint {
         pack.addProvider((((output, registriesFuture) -> {
             RegenerationRecipeProvider provider = new RegenerationRecipeProvider(output);
 
-            provider.addShapedRecipe(ShapedRecipeJsonBuilder.create(RecipeCategory.MISC, RegenerationModItems.CADON_BOAT, 1)
-                    .group("iris")
-                    .pattern("P P")
-                    .pattern("PPP")
-                    .input('P', RegenerationModBlocks.CADON_PLANKS)
-                    .criterion(hasItem(RegenerationModBlocks.CADON_PLANKS), conditionsFromItem(RegenerationModBlocks.CADON_PLANKS)));
-
             return provider;
 
         })));
