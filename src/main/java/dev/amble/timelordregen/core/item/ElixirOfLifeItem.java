@@ -12,28 +12,37 @@ import net.minecraft.util.UseAction;
 import net.minecraft.world.World;
 
 public class ElixirOfLifeItem extends Item {
-	public ElixirOfLifeItem(Settings settings) {
-		super(settings.food(new FoodComponent.Builder().alwaysEdible().build()));
-	}
 
-	@Override
-	public ItemStack finishUsing(ItemStack stack, World world, LivingEntity user) {
-		if (!world.isClient() && user instanceof RegenerationCapable capability) {
-			capability.getRegenerationInfo().setUsesLeft(RegenerationInfo.MAX_REGENERATIONS);
+    public ElixirOfLifeItem(Settings settings) {
+        super(settings.food(new FoodComponent.Builder().alwaysEdible().build()));
+    }
 
-			world.playSound(null, user.getX(), user.getY(), user.getZ(), SoundEvents.ITEM_TOTEM_USE, user.getSoundCategory(), 1.0F, 1.0F);
-		}
+    @Override
+    public ItemStack finishUsing(ItemStack stack, World world, LivingEntity user) {
+        if (!world.isClient() && user instanceof RegenerationCapable capable) {
+            // 如果还不是时间领主，先设置为时间领主
+            if (!capable.isTimelord()) {
+                capable.setTimelord(true);
+            }
 
-		return super.finishUsing(stack, world, user);
-	}
+            RegenerationInfo info = capable.getRegenerationInfo();
+            if (info != null) {
+                info.setUsesLeft(RegenerationInfo.MAX_REGENERATIONS);
+                world.playSound(null, user.getX(), user.getY(), user.getZ(),
+                        SoundEvents.ITEM_TOTEM_USE, user.getSoundCategory(), 1.0F, 1.0F);
+            }
+        }
 
-	@Override
-	public SoundEvent getEatSound() {
-		return SoundEvents.ENTITY_GENERIC_DRINK;
-	}
+        return super.finishUsing(stack, world, user);
+    }
 
-	@Override
-	public UseAction getUseAction(ItemStack stack) {
-		return UseAction.DRINK;
-	}
+    @Override
+    public SoundEvent getEatSound() {
+        return SoundEvents.ENTITY_GENERIC_DRINK;
+    }
+
+    @Override
+    public UseAction getUseAction(ItemStack stack) {
+        return UseAction.DRINK;
+    }
 }

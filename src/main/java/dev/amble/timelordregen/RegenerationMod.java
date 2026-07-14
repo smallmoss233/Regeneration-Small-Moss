@@ -1,7 +1,6 @@
 package dev.amble.timelordregen;
 
 import dev.amble.timelordregen.advancement.RegenerationCriterions;
-import dev.amble.timelordregen.api.boat.RegistryContainer2;
 import dev.amble.timelordregen.commands.RegenCommand;
 import dev.amble.timelordregen.compat.Compat;
 import dev.amble.timelordregen.core.*;

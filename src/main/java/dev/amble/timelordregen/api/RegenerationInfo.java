@@ -305,13 +305,14 @@ public class RegenerationInfo {
         if (this.invulnerableUntil <= 0) return;
 
         if (worldTime >= this.invulnerableUntil) {
+            // 无敌期结束
             this.invulnerableUntil = -1;
             this.markDirty();
             RegenerationMod.LOGGER.info("Invulnerability ended for {}", entity.getUuid());
             return;
         }
 
-        // 加速回血：每 tick 尝试回血，频率比正常高 2-3 倍
+        // 加速回血
         this.tickRegenBoost(entity);
     }
 
@@ -372,6 +373,7 @@ public class RegenerationInfo {
         if (this.confusedUntil <= 0) return;
 
         if (worldTime >= this.confusedUntil) {
+            // 混乱期结束
             this.confusedUntil = -1;
             this.confusionEffectTimer = 0;
             this.markDirty();
@@ -400,7 +402,7 @@ public class RegenerationInfo {
                     0, false, false, true
             );
         } else if (effectRoll < 55) {
-            // 25% 黑暗 (Darkness) - FIX: 从失明改为黑暗，更沉浸
+            // 25% 黑暗 (Darkness) - 比失明更沉浸
             effect = new StatusEffectInstance(
                     StatusEffects.DARKNESS,
                     60 + RegenerationMod.RANDOM.nextInt(80), // 3-7 秒
@@ -421,9 +423,9 @@ public class RegenerationInfo {
                     0, false, false, true
             );
         } else {
-            // 10% 瞬间跳跃
+            // 10% 饥饿
             effect = new StatusEffectInstance(
-                    StatusEffects.JUMP_BOOST,
+                    StatusEffects.HUNGER,
                     20 + RegenerationMod.RANDOM.nextInt(40), // 1-3 秒
                     2 + RegenerationMod.RANDOM.nextInt(3), false, false, true
             );
@@ -433,7 +435,7 @@ public class RegenerationInfo {
             entity.addStatusEffect(effect);
         }
 
-        // 30% 概率随机转向
+        // 30% 概率随机转向，模拟眩晕
         if (RegenerationMod.RANDOM.nextFloat() < 0.3f) {
             float randomYaw = (RegenerationMod.RANDOM.nextFloat() - 0.5f) * 90f;
             entity.setYaw(entity.getYaw() + randomYaw);
@@ -631,7 +633,12 @@ public class RegenerationInfo {
             RegenerationMod.LOGGER.warn("Received RegenerationInfo from server for player {}, but player is not RegenerationCapable", playerId);
             return;
         }
+
+        // FIX: 同步 RegenerationInfo 时，也标记玩家为时间领主
+        // 这样客户端的 isTimelord() 就能正确返回 true
         entity.setAttached(Attachments.REGENERATION, info);
+        entity.setAttached(Attachments.IS_TIMELORD, true);
+
         RegenerationMod.LOGGER.debug("RegenerationInfo synced to client for {}", playerId);
     }
 

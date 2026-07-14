@@ -1,10 +1,8 @@
 package dev.amble.timelordregen.core;
 
 import dev.amble.lib.container.impl.ItemContainer;
-import dev.amble.lib.datagen.util.AutomaticModel;
 import dev.amble.lib.datagen.util.NoEnglish;
 import dev.amble.lib.item.AItemSettings;
-import dev.amble.timelordregen.api.boat.ABoatItem;
 import dev.amble.timelordregen.core.item.ElixirOfLifeItem;
 import dev.amble.timelordregen.core.item.PocketWatchItem;
 import net.minecraft.item.Item;
