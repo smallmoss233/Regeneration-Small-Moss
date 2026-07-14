@@ -12,12 +12,23 @@ public class ClientNetworking {
     public static void registerClientReceivers() {
         ClientPlayNetworking.registerGlobalReceiver(OPEN_GUI_PACKET, (client, handler, buf, responseSender) -> {
             client.execute(() -> {
-                MinecraftClient.getInstance().setScreen(new RegenerationSettingsScreen(MinecraftClient.getInstance().player));
+                // FIX: 空安全检查 - 不是时间领主时不打开设置界面
+                var player = MinecraftClient.getInstance().player;
+                if (player == null) return;
+
+                RegenerationInfo info = RegenerationInfo.get(player);
+                if (info == null) {
+                    // 不是时间领主，可以显示提示或静默忽略
+                    // 也可以打开一个提示界面
+                    return;
+                }
+
+                MinecraftClient.getInstance().setScreen(new RegenerationSettingsScreen(player));
             });
         });
 
-		ClientPlayNetworking.registerGlobalReceiver(RegenerationInfo.SYNC_PACKET, (client, handler, buf, responseSender) -> {
-			RegenerationInfo.receive(buf);
-		});
-	}
+        ClientPlayNetworking.registerGlobalReceiver(RegenerationInfo.SYNC_PACKET, (client, handler, buf, responseSender) -> {
+            RegenerationInfo.receive(buf);
+        });
+    }
 }

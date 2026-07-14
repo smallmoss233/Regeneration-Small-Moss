@@ -35,16 +35,34 @@
   "command.regen.name": "重生",
   "command.regen.triggered": "正在重生！",
   "command.regenui.name": "重生UI",
+  "command.timelordregen.success.set_timelord": "已将 %s 设为时间领主",
+  "command.timelordregen.success.set_uses": "已将 %s 的重生次数设为 %d",
+  "command.timelordregen.error.not_player": "目标不是玩家",
   "gui.regen.settings.remaining": "剩余重生次数：%s",
   "gui.regen.settings.title": "重生设置",
+  "gui.regen.settings.red": "红色",
+  "gui.regen.settings.green": "绿色",
+  "gui.regen.settings.blue": "蓝色",
+  "gui.regen.settings.color_value": "%s: %d",
+  "gui.regen.settings.save_close": "保存并关闭",
+  "gui.regen.settings.not_timelord": "你不是时间领主！",
+
+  "effect.timelordregen.confusion": "重生混乱",
+
+  "death.attack.timelordregen.regeneration": "%1$s 重生过度了",
+
   "item.timelordregen.elixir_of_life": "重生灵药",
+  "item.timelordregen.elixir_of_life.desc": "赋予时间领主重生能力",
   "item.timelordregen.pocket_watch": "怀表",
   "itemGroup.timelordregen.item_group": "重生",
+
   "origin.timelordregen.regeneration.description": "你的身体有一种通过再生全身细胞来欺骗死亡的方式，但只有有限的几次。在你最后一次重生时，你将成为一个新的起源。",
   "origin.timelordregen.regeneration.name": "重生",
   "origin.timelordregen.timelord.description": "你是一名时间领主，来自伽理弗雷，可以通过重生来逃脱死亡。",
   "origin.timelordregen.timelord.name": "时间领主",
+
   "key.timelordregen.open_settings": "打开重生设置",
   "category.timelordregen": "时间领主-重生",
+
   "dimension.timelordregen.gallifrey": "伽理弗雷"
 }

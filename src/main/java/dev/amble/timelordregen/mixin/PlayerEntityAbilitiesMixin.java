@@ -17,14 +17,6 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/**
- * 时间领主被动能力 Mixin
- * - 饥饿消耗 -35%
- * - 饱食度恢复 +35%
- * - 常驻 10% 抗性
- * - 生命恢复 1.5 倍
- * - 免疫幻翼（每 2 天重置一次）
- */
 @Mixin(PlayerEntity.class)
 public abstract class PlayerEntityAbilitiesMixin {
 
@@ -50,15 +42,13 @@ public abstract class PlayerEntityAbilitiesMixin {
         LivingEntity entity = (LivingEntity)(Object) this;
         RegenerationInfo info = RegenerationInfo.get(entity);
         if (info == null) return amount;
-
-        // 常态抗性（非无敌期）
         if (!info.isInvulnerable()) {
             return TimelordAbilities.applyResistance(amount);
         }
         return amount;
     }
 
-    // ========== 生命恢复 1.5x + 幻翼免疫 ==========
+    // ========== 生命恢复 1.5x + 幻翼免疫 + 氧气消耗 75% ==========
     @Inject(method = "tick", at = @At("TAIL"))
     private void timelord$tickAbilities(CallbackInfo ci) {
         PlayerEntity player = (PlayerEntity)(Object) this;
@@ -71,7 +61,6 @@ public abstract class PlayerEntityAbilitiesMixin {
             int boostedInterval = TimelordAbilities.modifyHealthRegenInterval(80);
             if (this.timelord$regenBoostTimer >= boostedInterval) {
                 this.timelord$regenBoostTimer = 0;
-                // 饥饿度足够时才回血（和原版一致）
                 if (player.getHungerManager().getFoodLevel() > 0 ||
                         player.getWorld().getGameRules().getBoolean(net.minecraft.world.GameRules.NATURAL_REGENERATION)) {
                     player.heal(1.0f);
@@ -82,6 +71,15 @@ public abstract class PlayerEntityAbilitiesMixin {
             }
         } else {
             this.timelord$regenBoostTimer = 0;
+        }
+
+        // --- 氧气消耗 75% ---
+        // 原版：每 tick 在水下减 1 点 air
+        // 时间领主：每 4 tick 才减 1 点（即 75% 速度）
+        if (player.isSubmergedInWater() && !TimelordAbilities.shouldDecreaseAirSupply(player.age)) {
+            // 跳过这次氧气消耗：补偿回去
+            // 因为 LivingEntity.baseTick 已经减了 1，我们加回来
+            player.setAir(player.getAir() + 1);
         }
 
         // --- 幻翼免疫：每 2 天重置一次 TIME_SINCE_REST ---
