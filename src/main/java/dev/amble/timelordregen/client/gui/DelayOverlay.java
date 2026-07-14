@@ -2,7 +2,6 @@ package dev.amble.timelordregen.client.gui;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.amble.timelordregen.RegenerationMod;
-import dev.amble.timelordregen.api.RegenerationEvents;
 import dev.amble.timelordregen.api.RegenerationInfo;
 import dev.amble.timelordregen.client.sound.PlayerFollowingLoopingSound;
 import dev.amble.timelordregen.core.RegenerationSounds;
@@ -14,61 +13,63 @@ import net.minecraft.sound.SoundCategory;
 import net.minecraft.util.Identifier;
 
 public class DelayOverlay implements HudRenderCallback {
-	private static final Identifier TEXTURE = RegenerationMod.id("textures/gui/delay_overlay.png");
-	private static PlayerFollowingLoopingSound SOUND;
-	private static final float FADEOUT_THRESHOLD = 0.75F;
-	private static final float BACKGROUND_VALUE = 0.1F;
+    private static final Identifier TEXTURE = RegenerationMod.id("textures/gui/delay_overlay.png");
+    private static PlayerFollowingLoopingSound SOUND;
 
-	@Override
-	public void onHudRender(DrawContext context, float tickDelta) {
-		MinecraftClient mc = MinecraftClient.getInstance();
+    @Override
+    public void onHudRender(DrawContext context, float tickDelta) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player == null || mc.world == null) return;
 
-		if (mc.player == null || mc.world == null)
-			return;
+        RegenerationInfo info = RegenerationInfo.get(mc.player);
+        boolean active = info != null && !info.isRegenerating() && info.getDelay().isRunning();
 
-		RegenerationInfo info = RegenerationInfo.get(mc.player);
+        // 如果没有激活状态，停止音效并退出
+        if (!active) {
+            if (SOUND != null) {
+                mc.getSoundManager().stop(SOUND);
+                SOUND = null;
+            }
+            return;
+        }
 
-		boolean hasFx = info != null && !info.isRegenerating() && info.getDelay().isRunning();
-		if (!hasFx) {
-			if (SOUND != null) {
-				mc.getSoundManager().stop(SOUND);
-				SOUND = null;
-			}
-			return;
-		}
+        // 计算脉冲透明度：周期 5 秒（100 ticks），范围 0 ~ 0.5
+        float time = mc.player.age + tickDelta;
+        float period = 5 * 20; // 100 ticks
+        float pulse = (float) (0.5 * (0.5 + 0.5 * Math.sin(2 * Math.PI * time / period)));
+        float opacity = Math.max(0, Math.min(0.5f, pulse)); // 严格限制在 0~0.5
 
-		float opacity = info.getDelay().getEventProgress(mc.player.age + tickDelta) + BACKGROUND_VALUE;
-		opacity = (float) (opacity * getFadeoutMultiplier(opacity, FADEOUT_THRESHOLD, 1.0F, 12.0F));
+        // 管理循环音效，音量跟随透明度（最大音量 25%）
+        if (SOUND == null || !mc.getSoundManager().isPlaying(SOUND)) {
+            SOUND = new PlayerFollowingLoopingSound(RegenerationSounds.SWING_REGEN_LOOP, SoundCategory.PLAYERS, opacity * 0.5f);
+            mc.getSoundManager().play(SOUND);
+        } else {
+            SOUND.setVolume(opacity * 0.5f);
+        }
 
-		opacity = Math.max(opacity, BACKGROUND_VALUE);
+        // 如果透明度太低，跳过渲染（但音效继续）
+        if (opacity < 0.01f) return;
 
-		if (SOUND == null || !mc.getSoundManager().isPlaying(SOUND)) {
-			SOUND = new PlayerFollowingLoopingSound(RegenerationSounds.SWING_REGEN_LOOP, SoundCategory.PLAYERS, opacity);
-			mc.getSoundManager().play(SOUND);
-		}
+        // 仅在第一人称视角下显示叠加层
+        if (mc.options.getPerspective() != Perspective.FIRST_PERSON) return;
 
-		SOUND.setVolume(opacity * 0.5F);
+        // 渲染叠加层
+        RenderSystem.disableDepthTest();
+        RenderSystem.depthMask(false);
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
 
-		if (opacity <= 0.0F) {
-			return;
-		}
+        // 设置颜色（白色，透明度为 opacity）
+        RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, opacity);
 
-		// TODO \/ breaks with chat open
-		if (mc.options.getPerspective() == Perspective.FIRST_PERSON) {
-			RenderSystem.disableDepthTest();
-			RenderSystem.depthMask(false);
-			context.setShaderColor(1.0F, 1.0F, 1.0F, opacity);
-			context.drawTexture(TEXTURE, 0, 0, 0, 0.0F, 0.0F, context.getScaledWindowWidth(), context.getScaledWindowHeight(), context.getScaledWindowWidth(), context.getScaledWindowHeight());
-			RenderSystem.defaultBlendFunc();
-			RenderSystem.depthMask(true);
-			RenderSystem.enableDepthTest();
-			context.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
-		}
-	}
+        int screenWidth = context.getScaledWindowWidth();
+        int screenHeight = context.getScaledWindowHeight();
+        context.drawTexture(TEXTURE, 0, 0, 0, 0, screenWidth, screenHeight, screenWidth, screenHeight);
 
-	private static double getFadeoutMultiplier(float x, float start, float end, float steepness) {
-		double t = (x - start) / (end - start);
-		// Logistic function centered at t = 0.5
-		return 1.0 / (1.0 + Math.exp(steepness * (t - 0.5)));
-	}
+        // 恢复颜色（避免影响其他渲染）
+        RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
+        RenderSystem.disableBlend();
+        RenderSystem.depthMask(true);
+        RenderSystem.enableDepthTest();
+    }
 }

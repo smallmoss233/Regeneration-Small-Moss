@@ -18,13 +18,13 @@ public class RegenerationSettingsScreen extends Screen {
     private ColorSlider greenSlider;
     private ColorSlider blueSlider;
     private Vector3f color;
-	private RegenerationInfo info;
+    private RegenerationInfo info;
 
     public RegenerationSettingsScreen(PlayerEntity player) {
         super(Text.translatable("gui.regen.settings.title"));
         this.player = player;
-        this.color = new Vector3f(); // TODO PlayerSettings.getParticleColor(player.getUuid());
-	    this.info = RegenerationInfo.get(player);
+        this.color = new Vector3f(); // TODO：获取玩家的粒子颜色（PlayerSettings.getParticleColor(player.getUuid())）
+        this.info = RegenerationInfo.get(player);
     }
 
     @Override
@@ -53,7 +53,7 @@ public class RegenerationSettingsScreen extends Screen {
                 greenSlider.getSliderValue(),
                 blueSlider.getSliderValue()
         );
-        // TODO PlayerSettings.setParticleColor(player.getUuid(), color);
+        // TODO：设置玩家的粒子颜色（PlayerSettings.setParticleColor(player.getUuid(), color)）
     }
 
     private class ColorSlider extends SliderWidget {
