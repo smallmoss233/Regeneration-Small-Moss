@@ -7,7 +7,8 @@
     "EntityMixin",
     "LivingEntityMixin",
     "PlayerEntityMixin",
-    "origin.PlayerOriginComponentMixin"
+    "origin.PlayerOriginComponentMixin",
+    "PlayerEntityAbilitiesMixin"
   ],
   "client": [
     "ait.ControlEntityRendererMixin",
