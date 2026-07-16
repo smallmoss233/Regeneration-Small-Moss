@@ -1,6 +1,7 @@
 package dev.amble.timelordregen.api;
 
 import dev.amble.lib.client.bedrock.BedrockAnimationReference;
+import dev.amble.lib.skin.SkinData;
 import dev.amble.timelordregen.RegenerationMod;
 import dev.amble.timelordregen.animation.AnimationSet;
 import dev.amble.timelordregen.animation.AnimationTemplate;
@@ -15,6 +16,7 @@ import dev.drtheo.scheduler.api.common.Scheduler;
 import dev.drtheo.scheduler.api.common.TaskStage;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.fabricmc.fabric.api.entity.event.v1.ServerEntityWorldChangeEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
@@ -31,6 +33,7 @@ import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.registry.tag.DamageTypeTags;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.sound.SoundEvents;
+import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
@@ -43,8 +46,9 @@ import java.util.UUID;
 
 public class RegenerationInfo {
     public static final Identifier SYNC_PACKET = RegenerationMod.id("sync_info");
+    public static final Identifier UPDATE_SKIN_PACKET = RegenerationMod.id("update_skin_setting");
+    public static final Identifier RESET_SKIN_PACKET = RegenerationMod.id("reset_skin");
 
-    // ========== 静态初始化事件监听 ==========
     public static void init() {
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
             List<Entity> entities = new ArrayList<>(server.getPlayerManager().getPlayerList());
@@ -99,9 +103,51 @@ public class RegenerationInfo {
             }
             return ActionResult.PASS;
         });
+
+        ServerEntityWorldChangeEvents.AFTER_PLAYER_CHANGE_WORLD.register((player, origin, destination) -> {
+            RegenerationInfo info = RegenerationInfo.get(player);
+            if (info != null && info.isSkinReset()) {
+                clearPlayerSkin(player);
+            }
+        });
+
+        ServerPlayNetworking.registerGlobalReceiver(UPDATE_SKIN_PACKET, (server, player, handler, buf, responseSender) -> {
+            boolean changeSkin = buf.readBoolean();
+            server.execute(() -> {
+                RegenerationInfo info = RegenerationInfo.get(player);
+                if (info != null) {
+                    info.setChangeSkinOnRegen(changeSkin);
+                }
+            });
+        });
+
+        ServerPlayNetworking.registerGlobalReceiver(RESET_SKIN_PACKET, (server, player, handler, buf, responseSender) -> {
+            server.execute(() -> {
+                RegenerationInfo info = RegenerationInfo.get(player);
+                if (info != null) {
+                    info.setSkinReset(true);
+                }
+                clearPlayerSkin(player);
+                player.sendMessage(Text.translatable("gui.regen.settings.skin_reset"), false);
+            });
+        });
     }
 
-    // ========== CODEC（序列化）==========
+    private static void clearPlayerSkin(ServerPlayerEntity player) {
+        player.getGameProfile().getProperties().removeAll("textures");
+
+        var packet = new net.minecraft.network.packet.s2c.play.PlayerListS2CPacket(
+                net.minecraft.network.packet.s2c.play.PlayerListS2CPacket.Action.UPDATE_DISPLAY_NAME,
+                player
+        );
+        player.getWorld().getServer().getPlayerManager().sendToAll(packet);
+
+        boolean isAlex = (player.getUuid().hashCode() & 1) == 1;
+        try {
+            SkinData.usernameUpload(isAlex ? "Alex" : "Steve", player.getUuid());
+        } catch (Exception ignored) {}
+    }
+
     public static final Codec<RegenerationInfo> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Codec.INT.fieldOf("usesLeft").forGetter(RegenerationInfo::getUsesLeft),
             Codec.BOOL.fieldOf("isRegenerating").forGetter(RegenerationInfo::isRegenerating),
@@ -112,25 +158,28 @@ public class RegenerationInfo {
             Codec.FLOAT.fieldOf("colorG").forGetter(info -> info.particleColor.y()),
             Codec.FLOAT.fieldOf("colorB").forGetter(info -> info.particleColor.z()),
             Codec.LONG.optionalFieldOf("invulnerableUntil", -1L).forGetter(RegenerationInfo::getInvulnerableUntil),
-            Codec.LONG.optionalFieldOf("confusedUntil", -1L).forGetter(RegenerationInfo::getConfusedUntil)
-    ).apply(instance, (usesLeft, isRegenerating, regenQueued, animationId, delay, r, g, b, invulnUntil, confUntil) -> {
+            Codec.LONG.optionalFieldOf("confusedUntil", -1L).forGetter(RegenerationInfo::getConfusedUntil),
+            Codec.BOOL.optionalFieldOf("changeSkinOnRegen", true).forGetter(RegenerationInfo::isChangeSkinOnRegen),
+            Codec.BOOL.optionalFieldOf("skinReset", false).forGetter(RegenerationInfo::isSkinReset)
+    ).apply(instance, (usesLeft, isRegenerating, regenQueued, animationId, delay, r, g, b, invulnUntil, confUntil, changeSkin, skinReset) -> {
         RegenerationInfo info = new RegenerationInfo(usesLeft, isRegenerating, regenQueued, animationId, delay);
         info.particleColor.set(r, g, b);
         info.invulnerableUntil = invulnUntil;
         info.confusedUntil = confUntil;
+        info.changeSkinOnRegen = changeSkin;
+        info.skinReset = skinReset;
         return info;
     }));
 
     public static final int MAX_REGENERATIONS = 12;
-    private static final int INVULNERABLE_DURATION = 24000; // MC 内一天
-    private static final int CONFUSION_MIN_TICKS = 1200;      // 1 分钟
-    private static final int CONFUSION_MAX_EXTRA_TICKS = 3601; // 额外 0-3 分钟 (1200-4800 ticks 总计)
-    private static final int CONFUSION_EFFECT_INTERVAL_MIN = 100; // 5 秒
-    private static final int CONFUSION_EFFECT_INTERVAL_MAX = 300; // 15 秒
+    private static final int INVULNERABLE_DURATION = 24000;
+    private static final int CONFUSION_MIN_TICKS = 1200;
+    private static final int CONFUSION_MAX_EXTRA_TICKS = 3601;
+    private static final int CONFUSION_EFFECT_INTERVAL_MIN = 100;
+    private static final int CONFUSION_EFFECT_INTERVAL_MAX = 300;
     private static final float MIN_DAMAGE_CAP = 0.1f;
-    private static final float REGEN_BOOST_MULTIPLIER = 3.0f; // 无敌期回血加速倍数
+    private static final float REGEN_BOOST_MULTIPLIER = 3.0f;
 
-    // ========== 字段 ==========
     private int usesLeft;
     private boolean isRegenerating;
     private boolean regenQueued;
@@ -141,13 +190,14 @@ public class RegenerationInfo {
     @Nullable
     private AnimationSet currentAnimationSet;
 
-    // 重生后状态
-    private long invulnerableUntil; // 世界时间，-1 表示未激活
-    private long confusedUntil;     // 世界时间，-1 表示未激活
+    private long invulnerableUntil;
+    private long confusedUntil;
     private int confusionEffectTimer;
-    private int regenBoostTimer;    // 回血加速 tick 计时器
+    private int regenBoostTimer;
 
-    // ========== 构造器 ==========
+    private boolean changeSkinOnRegen = true;
+    private boolean skinReset = false;
+
     private RegenerationInfo(int usesLeft, boolean isRegenerating, boolean regenQueued, Identifier animation, Delay delay) {
         this.usesLeft = usesLeft;
         this.isRegenerating = isRegenerating;
@@ -165,29 +215,19 @@ public class RegenerationInfo {
         this(0, false, false, RegenAnimRegistry.getInstance().getRandom().id(), new Delay());
     }
 
-    // ========== Getter / Setter ==========
-    public int getUsesLeft() {
-        return usesLeft;
-    }
-
+    public int getUsesLeft() { return usesLeft; }
     public void setUsesLeft(int usesLeft) {
         this.usesLeft = MathHelper.clamp(usesLeft, 0, MAX_REGENERATIONS);
         this.markDirty();
     }
 
-    public boolean isRegenerating() {
-        return isRegenerating;
-    }
-
+    public boolean isRegenerating() { return isRegenerating; }
     public void setRegenerating(boolean regenerating) {
         isRegenerating = regenerating;
         this.markDirty();
     }
 
-    public boolean isRegenQueued() {
-        return regenQueued;
-    }
-
+    public boolean isRegenQueued() { return regenQueued; }
     public void setRegenQueued(boolean regenQueued) {
         this.regenQueued = regenQueued;
         this.markDirty();
@@ -205,51 +245,39 @@ public class RegenerationInfo {
         this.markDirty();
     }
 
-    public Delay getDelay() {
-        return delay;
-    }
+    public Delay getDelay() { return delay; }
 
-    public boolean isDirty() {
-        return dirty;
-    }
+    public boolean isDirty() { return dirty; }
+    public void setDirty(boolean dirty) { this.dirty = dirty; }
 
-    public void setDirty(boolean dirty) {
-        this.dirty = dirty;
-    }
-
-    public Vector3f getParticleColor() {
-        return particleColor;
-    }
-
+    public Vector3f getParticleColor() { return particleColor; }
     public void setParticleColor(Vector3f color) {
         this.particleColor.set(color);
         this.markDirty();
     }
 
-    public long getInvulnerableUntil() {
-        return invulnerableUntil;
+    public long getInvulnerableUntil() { return invulnerableUntil; }
+    public long getConfusedUntil() { return confusedUntil; }
+
+    public boolean isInvulnerable() { return this.invulnerableUntil > 0; }
+    public boolean isConfused() { return this.confusedUntil > 0; }
+
+    public boolean isChangeSkinOnRegen() { return changeSkinOnRegen; }
+    public void setChangeSkinOnRegen(boolean value) {
+        this.changeSkinOnRegen = value;
+        this.markDirty();
     }
 
-    public long getConfusedUntil() {
-        return confusedUntil;
+    public boolean isSkinReset() { return skinReset; }
+    public void setSkinReset(boolean value) {
+        this.skinReset = value;
+        this.markDirty();
     }
 
-    public boolean isInvulnerable() {
-        return this.invulnerableUntil > 0;
-    }
-
-    public boolean isConfused() {
-        return this.confusedUntil > 0;
-    }
-
-    // ========== 业务方法 ==========
     public void decrement() {
         this.setUsesLeft(this.getUsesLeft() - 1);
     }
 
-    /**
-     * 每 tick 调用，处理延迟和重生状态
-     */
     public void tick(LivingEntity entity) {
         if (entity.getWorld().isClient) return;
 
@@ -262,10 +290,7 @@ public class RegenerationInfo {
 
         long worldTime = entity.getWorld().getTime();
 
-        // 处理无敌期
         this.tickInvulnerability(entity, worldTime);
-
-        // 处理混乱期
         this.tickConfusion(entity, worldTime);
 
         if (delay.isRunning()) {
@@ -298,43 +323,30 @@ public class RegenerationInfo {
         }
     }
 
-    /**
-     * 处理无敌期逻辑 - 动态伤害减免 + 加速回血
-     */
     private void tickInvulnerability(LivingEntity entity, long worldTime) {
         if (this.invulnerableUntil <= 0) return;
 
         if (worldTime >= this.invulnerableUntil) {
-            // 无敌期结束
             this.invulnerableUntil = -1;
             this.markDirty();
             RegenerationMod.LOGGER.info("Invulnerability ended for {}", entity.getUuid());
             return;
         }
 
-        // 加速回血
         this.tickRegenBoost(entity);
     }
 
-    /**
-     * 无敌期加速回血
-     * 正常自然回血每 80 ticks (4秒) 回 1 点
-     * 加速后每 80/3 ≈ 26 ticks 回 1 点，即 3 倍速
-     */
     private void tickRegenBoost(LivingEntity entity) {
         if (entity.getHealth() >= entity.getMaxHealth()) return;
         if (!(entity instanceof PlayerEntity)) return;
 
         this.regenBoostTimer++;
-        // 正常回血间隔约 80 ticks，加速后除以倍数
         int boostedInterval = (int) (80 / REGEN_BOOST_MULTIPLIER);
         if (this.regenBoostTimer >= boostedInterval) {
             this.regenBoostTimer = 0;
-            // 饥饿度足够时才回血（和原版一致）
             PlayerEntity player = (PlayerEntity) entity;
             if (player.getHungerManager().getFoodLevel() > 0 || player.getWorld().getGameRules().getBoolean(net.minecraft.world.GameRules.NATURAL_REGENERATION)) {
                 entity.heal(1.0f);
-                // 消耗饥饿度（原版自然回血的消耗比例）
                 if (player.getHungerManager().getFoodLevel() > 0) {
                     player.getHungerManager().addExhaustion(3.0f);
                 }
@@ -342,23 +354,14 @@ public class RegenerationInfo {
         }
     }
 
-    /**
-     * 计算动态伤害减免后的伤害值
-     * 包含摔落伤害等所有非真实伤害
-     * 血量越低，减免越强，最低伤害为 0.1
-     * 真实伤害（/kill、虚空、魔法等）不减免
-     */
     public float applyDamageReduction(LivingEntity entity, net.minecraft.entity.damage.DamageSource source, float amount) {
         if (!this.isInvulnerable()) return amount;
 
-        // 真实伤害不减免：/kill、虚空、魔法伤害、饥饿、溺水等
         if (source.isIn(DamageTypeTags.BYPASSES_INVULNERABILITY)) {
             return amount;
         }
 
-        // 摔落伤害、火焰、爆炸、物理攻击等都参与减免
         float healthPercent = entity.getHealth() / entity.getMaxHealth();
-        // 血量越低，减免越强：满血时几乎无减免，残血时大幅减免
         float reductionFactor = 1.0f - (healthPercent * 0.9f);
         float reducedAmount = MathHelper.lerp(reductionFactor, amount, MIN_DAMAGE_CAP);
         reducedAmount = Math.max(reducedAmount, MIN_DAMAGE_CAP);
@@ -366,14 +369,10 @@ public class RegenerationInfo {
         return reducedAmount;
     }
 
-    /**
-     * 处理混乱期逻辑：随机施加负面效果、随机转向等
-     */
     private void tickConfusion(LivingEntity entity, long worldTime) {
         if (this.confusedUntil <= 0) return;
 
         if (worldTime >= this.confusedUntil) {
-            // 混乱期结束
             this.confusedUntil = -1;
             this.confusionEffectTimer = 0;
             this.markDirty();
@@ -386,47 +385,40 @@ public class RegenerationInfo {
         this.confusionEffectTimer--;
         if (this.confusionEffectTimer > 0) return;
 
-        // 每 5-15 秒触发一次混乱效果
         this.confusionEffectTimer = CONFUSION_EFFECT_INTERVAL_MIN +
                 RegenerationMod.RANDOM.nextInt(CONFUSION_EFFECT_INTERVAL_MAX - CONFUSION_EFFECT_INTERVAL_MIN + 1);
 
-        // 随机选择一种负面效果
         int effectRoll = RegenerationMod.RANDOM.nextInt(100);
         StatusEffectInstance effect = null;
 
         if (effectRoll < 30) {
-            // 30% 反胃 (Nausea)
             effect = new StatusEffectInstance(
                     StatusEffects.NAUSEA,
-                    100 + RegenerationMod.RANDOM.nextInt(100), // 5-10 秒
+                    100 + RegenerationMod.RANDOM.nextInt(100),
                     0, false, false, true
             );
         } else if (effectRoll < 55) {
-            // 25% 黑暗 (Darkness) - 比失明更沉浸
             effect = new StatusEffectInstance(
                     StatusEffects.DARKNESS,
-                    60 + RegenerationMod.RANDOM.nextInt(80), // 3-7 秒
+                    60 + RegenerationMod.RANDOM.nextInt(80),
                     0, false, false, true
             );
         } else if (effectRoll < 75) {
-            // 20% 缓慢 (Slowness)
             effect = new StatusEffectInstance(
                     StatusEffects.SLOWNESS,
-                    60 + RegenerationMod.RANDOM.nextInt(80), // 3-7 秒
+                    60 + RegenerationMod.RANDOM.nextInt(80),
                     RegenerationMod.RANDOM.nextInt(2), false, false, true
             );
         } else if (effectRoll < 90) {
-            // 15% 虚弱 (Weakness)
             effect = new StatusEffectInstance(
                     StatusEffects.WEAKNESS,
-                    60 + RegenerationMod.RANDOM.nextInt(60), // 3-6 秒
+                    60 + RegenerationMod.RANDOM.nextInt(60),
                     0, false, false, true
             );
         } else {
-            // 10% 饥饿
             effect = new StatusEffectInstance(
                     StatusEffects.HUNGER,
-                    20 + RegenerationMod.RANDOM.nextInt(40), // 1-3 秒
+                    20 + RegenerationMod.RANDOM.nextInt(40),
                     2 + RegenerationMod.RANDOM.nextInt(3), false, false, true
             );
         }
@@ -435,7 +427,6 @@ public class RegenerationInfo {
             entity.addStatusEffect(effect);
         }
 
-        // 30% 概率随机转向，模拟眩晕
         if (RegenerationMod.RANDOM.nextFloat() < 0.3f) {
             float randomYaw = (RegenerationMod.RANDOM.nextFloat() - 0.5f) * 90f;
             entity.setYaw(entity.getYaw() + randomYaw);
@@ -448,9 +439,6 @@ public class RegenerationInfo {
         }
     }
 
-    /**
-     * 尝试触发重生延迟（如果条件允许）
-     */
     public boolean tryStart(LivingEntity entity) {
         if (this.isActive() || this.usesLeft <= 0) return false;
         if (!entity.isAlive()) return false;
@@ -464,9 +452,6 @@ public class RegenerationInfo {
         return true;
     }
 
-    /**
-     * 实际开始重生过程
-     */
     private boolean start(LivingEntity entity) {
         if (this.isRegenerating() || this.usesLeft <= 0) return false;
         if (!entity.isAlive()) return false;
@@ -478,7 +463,10 @@ public class RegenerationInfo {
 
         if (entity instanceof AnimatedEntity animated) {
             AnimationTemplate template = RegenAnimRegistry.getInstance().getRandom();
-            AnimationSet set = template.instantiate(true);
+
+            boolean changeSkin = this.changeSkinOnRegen;
+
+            AnimationSet set = template.instantiate(changeSkin, this.skinReset);
             this.currentAnimationSet = set;
 
             set.finish(() -> {
@@ -504,16 +492,12 @@ public class RegenerationInfo {
         return true;
     }
 
-    /**
-     * 完成重生过程
-     */
     private void finish(LivingEntity entity) {
         RegenerationMod.LOGGER.info("finish() called for {}", entity.getUuid());
 
         this.resetAnimationState(entity);
         this.stopRegeneration(entity);
 
-        // 启动重生后状态：无敌期 + 混乱期
         long worldTime = entity.getWorld().getTime();
         this.invulnerableUntil = worldTime + INVULNERABLE_DURATION;
         int confusionDuration = CONFUSION_MIN_TICKS + RegenerationMod.RANDOM.nextInt(CONFUSION_MAX_EXTRA_TICKS);
@@ -535,9 +519,6 @@ public class RegenerationInfo {
         );
     }
 
-    /**
-     * 重置实体的动画状态，防止动画残留导致无法移动
-     */
     private void resetAnimationState(LivingEntity entity) {
         if (!(entity instanceof AnimatedEntity animated)) return;
 
@@ -556,10 +537,6 @@ public class RegenerationInfo {
         return this.getAnimation().id();
     }
 
-    /**
-     * 停止重生过程并清理所有相关状态
-     * @param entity 需要清理动画状态的实体，可为 null
-     */
     public void stopRegeneration(@Nullable LivingEntity entity) {
         if (this.currentAnimationSet != null) {
             this.currentAnimationSet.cancel();
@@ -581,9 +558,6 @@ public class RegenerationInfo {
         RegenerationMod.LOGGER.debug("Regeneration stopped for (state reset)");
     }
 
-    /**
-     * @deprecated 请使用 {@link #stopRegeneration(LivingEntity)} 以确保动画状态被正确清理
-     */
     @Deprecated
     public void stopRegeneration() {
         this.stopRegeneration(null);
@@ -634,10 +608,15 @@ public class RegenerationInfo {
             return;
         }
 
-        // FIX: 同步 RegenerationInfo 时，也标记玩家为时间领主
-        // 这样客户端的 isTimelord() 就能正确返回 true
         entity.setAttached(Attachments.REGENERATION, info);
         entity.setAttached(Attachments.IS_TIMELORD, true);
+
+        if (info.isSkinReset() && entity instanceof net.minecraft.client.network.AbstractClientPlayerEntity clientPlayer) {
+            try {
+                // 无参 clear
+                SkinData.clear();
+            } catch (Exception ignored) {}
+        }
 
         RegenerationMod.LOGGER.debug("RegenerationInfo synced to client for {}", playerId);
     }
@@ -647,15 +626,14 @@ public class RegenerationInfo {
         return capability.getRegenerationInfo();
     }
 
-    // ========== 内部类 Delay ==========
     public static class Delay {
         public static final Codec<Delay> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.INT.fieldOf("start").forGetter(delay -> delay.start),
                 Codec.INT.fieldOf("lastEvent").forGetter(delay -> delay.lastEvent)
         ).apply(instance, Delay::new));
 
-        private static final int MAX_DURATION = 6000; // 5 minutes
-        private static final int TIME_TO_STOP = 300;  // 5 seconds
+        private static final int MAX_DURATION = 6000;
+        private static final int TIME_TO_STOP = 300;
         private static final float EVENT_CHANCE = 0.05f;
 
         private int start;
