@@ -13,6 +13,7 @@ import org.jetbrains.annotations.Nullable;
 @Environment(EnvType.CLIENT)
 public class RightRegenParticle extends ExplosionSmokeParticle {
     private final SpriteProvider spriteProvider;
+    private static final int TOTAL_FRAMES = 7;
 
     public RightRegenParticle(ClientWorld clientWorld, double d, double e, double f,
                               double velX, double velY, double velZ,
@@ -27,7 +28,6 @@ public class RightRegenParticle extends ExplosionSmokeParticle {
         double dirX, dirY, dirZ;
 
         if (!shouldFollowPlayer) {
-            // ★ 骨骼绑定模式：直接使用传入的世界空间速度，不再乘以 speed
             dirX = velX;
             dirY = velY;
             dirZ = velZ;
@@ -48,7 +48,6 @@ public class RightRegenParticle extends ExplosionSmokeParticle {
         }
 
         if (!shouldFollowPlayer) {
-            // ★ 骨骼绑定模式：传入速度已是最终速度，只加极微小随机避免完全静止
             this.velocityX = dirX + (Math.random() - 0.5) * 0.005;
             this.velocityY = dirY + (Math.random() - 0.5) * 0.005;
             this.velocityZ = dirZ + (Math.random() - 0.5) * 0.005;
@@ -70,24 +69,39 @@ public class RightRegenParticle extends ExplosionSmokeParticle {
         this.alpha = 0.4f + (float) Math.random() * 0.2f;
         this.scale *= 0.5f;
         this.setColor(1f, 0.9f, 0.9f);
-        this.maxAge = shortLife ? this.random.nextInt(2) + 4 : this.random.nextInt(4) + 10;
+
+        // ================================================================
+        // 确保 maxAge >= TOTAL_FRAMES，否则手动切帧会循环或跳帧
+        // ================================================================
+        if (shortLife) {
+            this.maxAge = this.random.nextInt(3) + 7; // 7~9
+        } else {
+            this.maxAge = this.random.nextInt(6) + 7; // 7~12
+        }
         this.collidesWithWorld = true;
+
+        // 强制初始帧为第 0 帧，覆盖基类随机选图
+        this.setSprite(spriteProvider.getSprite(0, 1000));
     }
 
     public ParticleTextureSheet getType() {
         return ParticleTextureSheet.PARTICLE_SHEET_TRANSLUCENT;
     }
 
+    @Override
     public int getBrightness(float tint) {
-        int i = super.getBrightness(tint);
-        int k = i >> 16 & 255;
-        return 240 | k << 16;
+        return 15728880; // 0xF000F0，全亮，不受场景光照影响
     }
 
     public void tick() {
         super.tick();
         if (!this.dead) {
-            this.setSpriteForAge(this.spriteProvider);
+            // ================================================================
+            // 手动顺序切帧，严格从 0 → 6 循环
+            // getSprite(frame, 6) → frame * 6 / 6 = frame
+            // ================================================================
+            int frame = (this.age - 1) % TOTAL_FRAMES;
+            this.setSprite(this.spriteProvider.getSprite(frame, TOTAL_FRAMES - 1));
         }
         if (!(this.alpha <= 0.0F)) {
             if (this.alpha > 0.01F) {
@@ -118,7 +132,11 @@ public class RightRegenParticle extends ExplosionSmokeParticle {
                     regenParticle.getEntity(world), regenParticle.getYawOffset(), regenParticle.getPitchOffset(),
                     regenParticle.getShouldPitch(), regenParticle.getShouldFollowPlayer(), regenParticle.getSpeed(),
                     regenParticle.isShortLife());
-            p.setSprite(this.spriteProvider);
+
+            // ================================================================
+            // 移除 p.setSprite(this.spriteProvider)，它调用的是 getSprite(Random)
+            // 构造函数里已经强制 setSprite(0, 1000) 为第 0 帧
+            // ================================================================
             return p;
         }
     }

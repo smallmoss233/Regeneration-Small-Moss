@@ -9,13 +9,12 @@
     "PlayerEntityMixin",
     "origin.PlayerOriginComponentMixin",
     "TimelordAbilities.PlayerEntityAbilitiesMixin",
-    "TimelordAbilities.PhantomSpawnerMixin",
+    "TimelordAbilities.PhantomSpawnerMixin"
   ],
   "client": [
     "ait.ControlEntityRendererMixin",
     "client.GallifreySkyboxMixin",
-    "client.LivingEntityRendererMixin",
-    "client.PlayerEntityRendererMixin"
+    "client.LivingEntityRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1
