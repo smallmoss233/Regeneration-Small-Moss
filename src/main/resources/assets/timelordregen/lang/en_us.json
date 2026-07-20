@@ -5,7 +5,6 @@
   "achievement.timelordregen.title.delay": "I don't want to go...",
   "achievement.timelordregen.title.regeneration": "Change, my dear.",
   "achievement.timelordregen.title.watch": "More than just a pocket watch!",
-
   "advancements.timelordregen.this_is_what.title": "What... is this...",
   "advancements.timelordregen.this_is_what.description": "The gods who walk in the shadows have for the first time become aware of incredible science.",
   "advancements.timelordregen.unbearably_painful.title": "...Unbearably painful",
@@ -34,13 +33,12 @@
   "block.timelordregen.typha_pod": "Typha Pod",
 
   "command.regen.data.error": "Regeneration data not found.",
+  "command.regen.detimelord.success": "Modified %s's biological data to non-Time Lord.",
   "command.regen.fail": "No regenerations left or already regenerating!",
   "command.regen.name": "Regenerate",
+  "command.regen.settimelord.success": "Modified %s's biological data to Time Lord.",
+  "command.regen.stopped": "Regeneration stopped.",
   "command.regen.triggered": "Regenerating!",
-  "command.regenui.name": "Regeneration UI",
-  "command.timelordregen.success.set_timelord": "Set %s as a Time Lord",
-  "command.timelordregen.success.set_uses": "Set %s's regeneration uses to %d",
-  "command.timelordregen.error.not_player": "Target is not a player",
 
   "gui.regen.settings.title": "Regeneration Settings",
   "gui.regen.settings.reset_skin": "Reset Skin",
@@ -50,15 +48,13 @@
   "gui.regen.settings.toggle_skin_change": "Change skin on regeneration: %s",
   "gui.regen.settings.on": "On",
   "gui.regen.settings.off": "Off",
+
   "timelordregen.tardis.alarm_message": "%s is regenerating!",
+
   "gui.regen.settings.tardis_mode": "Change TARDIS interior on regeneration: %s",
   "gui.regen.settings.tardis_mode.enabled": "Random",
   "gui.regen.settings.tardis_mode.disabled": "Disabled",
   "gui.regen.settings.tardis_mode.refurbish": "Refurbish Only",
-
-  "effect.timelordregen.confusion": "Regeneration Confusion",
-
-  "death.attack.timelordregen.regeneration": "%1$s regenerated too much",
 
   "item.timelordregen.elixir_of_life": "Elixir of Life",
   "item.timelordregen.elixir_of_life.desc": "(Grants you the regeneration ability of a Gallifreyan, transforming you into a true Time Lord)",

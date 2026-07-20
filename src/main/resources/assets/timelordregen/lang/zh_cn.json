@@ -33,13 +33,12 @@
   "block.timelordregen.typha_pod": "香蒲荚",
 
   "command.regen.data.error": "未找到重生数据。",
+  "command.regen.detimelord.success": "已将 %s 的生物数据修改为非时间领主。",
   "command.regen.fail": "没有剩余重生次数或已在重生中！",
   "command.regen.name": "重生",
+  "command.regen.settimelord.success": "已将 %s 的生物数据修改为时间领主。",
+  "command.regen.stopped": "已停止重生。",
   "command.regen.triggered": "正在重生！",
-  "command.regenui.name": "重生UI",
-  "command.timelordregen.success.set_timelord": "已将 %s 设为时间领主",
-  "command.timelordregen.success.set_uses": "已将 %s 的重生次数设为 %d",
-  "command.timelordregen.error.not_player": "目标不是玩家",
 
   "gui.regen.settings.title": "重生设置",
   "gui.regen.settings.reset_skin": "重置皮肤",
@@ -49,15 +48,13 @@
   "gui.regen.settings.toggle_skin_change": "重生更换皮肤：%s",
   "gui.regen.settings.on": "开",
   "gui.regen.settings.off": "关",
+
   "timelordregen.tardis.alarm_message": "%s 正在重生！",
+
   "gui.regen.settings.tardis_mode": "塔迪斯内重生更换内饰：%s",
   "gui.regen.settings.tardis_mode.enabled": "随机更换",
   "gui.regen.settings.tardis_mode.disabled": "关闭",
   "gui.regen.settings.tardis_mode.refurbish": "仅重构",
-
-  "effect.timelordregen.confusion": "重生混乱",
-
-  "death.attack.timelordregen.regeneration": "%1$s 重生过度了",
 
   "item.timelordregen.elixir_of_life": "重生灵药",
   "item.timelordregen.elixir_of_life.desc": "(赋予你伽理弗雷人的重生能力，蜕变为真正的时间领主)",
